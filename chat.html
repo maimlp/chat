@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Messagerie sécurisée</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; }
+    #messages { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 1em; margin-bottom: 1em; }
+    #inputMsg { width: 80%; padding: 0.5em; }
+    #sendBtn { padding: 0.5em 1em; }
+  </style>
+</head>
+<body>
+  <h1>Messagerie sécurisée</h1>
+  <div id="messages"></div>
+  <input id="inputMsg" placeholder="Écrire un message..." />
+  <button id="sendBtn">Envoyer</button>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const room = params.get('room');
+    const keyB64 = params.get('key');
+
+    if (!room || !keyB64) {
+      document.body.innerHTML = '<h2>Erreur : il faut un lien avec room et key dans l’URL.</h2><p>Exemple : ?room=abc123&key=base64clé</p>';
+      throw new Error('URL invalide');
+    }
+
+    async function importKey(b64) {
+      const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
+    }
+
+    async function encrypt(key, text) {
+      const enc = new TextEncoder();
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const encrypted = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode(text));
+      return {iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted))};
+    }
+
+    async function decrypt(key, ivArr, dataArr) {
+      const iv = new Uint8Array(ivArr);
+      const data = new Uint8Array(dataArr);
+      try {
+        const decrypted = await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, data);
+        return new TextDecoder().decode(decrypted);
+      } catch {
+        return "[Message illisible]";
+      }
+    }
+
+    function loadMessages() {
+      const stored = localStorage.getItem('chat-'+room);
+      return stored ? JSON.parse(stored) : [];
+    }
+
+    function saveMessages(msgs) {
+      localStorage.setItem('chat-'+room, JSON.stringify(msgs));
+    }
+
+    async function displayMessages() {
+      const msgs = loadMessages();
+      const decrypted = [];
+      for (const m of msgs) {
+        const text = await decrypt(cryptoKey, m.iv, m.data);
+        decrypted.push(text);
+      }
+      messagesDiv.innerHTML = decrypted.map(m => `<div>${m}</div>`).join('');
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    const messagesDiv = document.getElementById('messages');
+    const inputMsg = document.getElementById('inputMsg');
+    const sendBtn = document.getElementById('sendBtn');
+
+    let cryptoKey;
+
+    importKey(keyB64).then(async (k) => {
+      cryptoKey = k;
+      await displayMessages();
+    });
+
+    sendBtn.onclick = async () => {
+      if (!inputMsg.value.trim()) return;
+      const encrypted = await encrypt(cryptoKey, inputMsg.value.trim());
+      const msgs = loadMessages();
+      msgs.push(encrypted);
+      saveMessages(msgs);
+      await displayMessages();
+      inputMsg.value = '';
+    };
+  </script>
+</body>
+</html>
