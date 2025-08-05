@@ -1,59 +1,74 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Chat sécurisé</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Sécurisé</title>
   <style>
     body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
-    #messages { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; }
-    input, button { padding: 10px; font-size: 16px; }
+    #messages { border: 1px solid #ccc; height: 300px; overflow-y: auto; padding: 10px; margin-bottom: 10px; }
+    input, button { padding: 10px; font-size: 16px; width: 100%; margin-bottom: 10px; }
   </style>
 </head>
 <body>
-  <h1>Chat sécurisé</h1>
+  <h1>Chat Sécurisé</h1>
   <div id="messages"></div>
-  <input type="text" id="messageInput" placeholder="Votre message..." />
+  <input type="text" id="messageInput" placeholder="Votre message...">
   <button onclick="sendMessage()">Envoyer</button>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     const room = urlParams.get('room');
     const key = urlParams.get('key');
 
-    const db = new EventSource(`https://api.npoint.io/${room}`);
+    if (!room || !key) {
+      alert("Paramètres manquants : ajoutez ?room=xxx&key=xxx dans l'URL");
+    }
 
+    const apiURL = `https://api.npoint.io/${room}`;
     const messagesDiv = document.getElementById('messages');
     const input = document.getElementById('messageInput');
 
-    function decrypt(text, key) {
-      try {
-        return CryptoJS.AES.decrypt(text, key).toString(CryptoJS.enc.Utf8);
-      } catch (e) {
-        return "Erreur de déchiffrement";
-      }
-    }
-
-    db.onmessage = function(event) {
-      const data = JSON.parse(event.data);
-      messagesDiv.innerHTML = '';
-      data.forEach((msg) => {
-        const p = document.createElement('p');
-        p.textContent = decrypt(msg, key);
-        messagesDiv.appendChild(p);
+    // Charger les messages existants
+    fetch(apiURL)
+      .then(res => res.json())
+      .then(data => {
+        data.forEach(encrypted => {
+          const decrypted = CryptoJS.AES.decrypt(encrypted, key).toString(CryptoJS.enc.Utf8);
+          const p = document.createElement('p');
+          p.textContent = decrypted || "(Impossible de décrypter)";
+          messagesDiv.appendChild(p);
+        });
+      })
+      .catch(() => {
+        console.log("Aucun message initial.");
       });
-    };
 
+    // Envoyer un message
     function sendMessage() {
-      const message = input.value;
+      const message = input.value.trim();
+      if (!message) return;
+
       const encrypted = CryptoJS.AES.encrypt(message, key).toString();
-      fetch(`https://api.npoint.io/${room}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([encrypted])
-      }).then(() => input.value = '');
+      fetch(apiURL)
+        .then(res => res.json())
+        .then(data => {
+          const newMessages = [...data, encrypted];
+          return fetch(apiURL, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newMessages)
+          });
+        })
+        .then(() => {
+          const p = document.createElement('p');
+          p.textContent = message;
+          messagesDiv.appendChild(p);
+          input.value = '';
+        })
+        .catch(err => alert("Erreur d'envoi : " + err));
     }
   </script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
 </body>
 </html>
